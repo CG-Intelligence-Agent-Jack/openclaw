@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChannelRuntimeSurface } from "../channels/plugins/channel-runtime-surface.types.js";
 import {
+  type ChannelAccountSnapshot,
   type ChannelGatewayContext,
   type ChannelId,
   type ChannelPlugin,
@@ -304,6 +305,59 @@ describe("server-channels auto restart", () => {
     expect(account?.running).toBe(true);
     expect(account?.restartPending).toBe(false);
     expect(account?.lastError).toContain("channel stop timed out");
+  });
+
+  it("force-retires a hung channel task so recovery can start a fresh lifecycle", async () => {
+    const statusSetters: Array<(next: ChannelAccountSnapshot) => void> = [];
+    const startAccount = vi.fn(async ({ setStatus }: ChannelGatewayContext<TestAccount>) => {
+      statusSetters.push(setStatus);
+      await new Promise<void>(() => {});
+    });
+    installTestRegistry(
+      createTestPlugin({
+        startAccount,
+      }),
+    );
+    const manager = createManager();
+
+    await manager.startChannels();
+    await Promise.resolve();
+
+    const stopTask = manager.stopChannel("discord", DEFAULT_ACCOUNT_ID, {
+      forceRetireOnTimeout: true,
+    });
+    await vi.advanceTimersByTimeAsync(5_000);
+    await stopTask;
+
+    let snapshot = manager.getRuntimeSnapshot();
+    let account = snapshot.channelAccounts.discord?.[DEFAULT_ACCOUNT_ID];
+    expect(account?.running).toBe(false);
+    expect(account?.connected).toBe(false);
+    expect(account?.activeRuns).toBe(0);
+    expect(account?.lastError).toContain("stale lifecycle force-retired");
+
+    await manager.startChannel("discord", DEFAULT_ACCOUNT_ID);
+    await Promise.resolve();
+
+    expect(startAccount).toHaveBeenCalledTimes(2);
+    statusSetters[1]?.({
+      accountId: DEFAULT_ACCOUNT_ID,
+      running: true,
+      connected: true,
+      lastError: null,
+    });
+    statusSetters[0]?.({
+      accountId: DEFAULT_ACCOUNT_ID,
+      running: false,
+      connected: false,
+      lastError: "late stale lifecycle update",
+    });
+
+    snapshot = manager.getRuntimeSnapshot();
+    account = snapshot.channelAccounts.discord?.[DEFAULT_ACCOUNT_ID];
+    expect(account?.running).toBe(true);
+    expect(account?.connected).toBe(true);
+    expect(account?.lastError).toBeNull();
   });
 
   it("marks enabled/configured when account descriptors omit them", () => {

@@ -184,11 +184,19 @@ type StartChannelOptions = {
   preserveManualStop?: boolean;
 };
 
+type StopChannelOptions = {
+  forceRetireOnTimeout?: boolean;
+};
+
 export type ChannelManager = {
   getRuntimeSnapshot: () => ChannelRuntimeSnapshot;
   startChannels: () => Promise<void>;
   startChannel: (channel: ChannelId, accountId?: string) => Promise<void>;
-  stopChannel: (channel: ChannelId, accountId?: string) => Promise<void>;
+  stopChannel: (
+    channel: ChannelId,
+    accountId?: string,
+    options?: StopChannelOptions,
+  ) => Promise<void>;
   markChannelLoggedOut: (channelId: ChannelId, cleared: boolean, accountId?: string) => void;
   isManuallyStopped: (channelId: ChannelId, accountId: string) => boolean;
   resetRestartAttempts: (channelId: ChannelId, accountId: string) => void;
@@ -392,6 +400,14 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
         let scopedChannelRuntime: ReturnType<typeof createTaskScopedChannelRuntime> | null = null;
         let channelRuntimeForTask: ChannelRuntimeSurface | undefined;
         let stopApprovalBootstrap: () => Promise<void> = async () => {};
+        const isCurrentLifecycle = () => store.aborts.get(id) === abort;
+        const setRuntimeForCurrentLifecycle = (next: ChannelAccountSnapshot) => {
+          if (!isCurrentLifecycle()) {
+            log.debug?.(`[${id}] ignored stale channel status update after lifecycle retired`);
+            return;
+          }
+          setRuntime(channelId, id, next);
+        };
         const stopTaskScopedApprovalRuntime = async () => {
           const scopedRuntime = scopedChannelRuntime;
           scopedChannelRuntime = null;
@@ -503,14 +519,14 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
                 abortSignal: abort.signal,
                 log,
                 getStatus: () => getRuntime(channelId, id),
-                setStatus: (next) => setRuntime(channelId, id, next),
+                setStatus: setRuntimeForCurrentLifecycle,
                 ...(channelRuntimeForTask ? { channelRuntime: channelRuntimeForTask } : {}),
               }),
             ),
           );
           const trackedPromise = task
             .then(() => {
-              if (abort.signal.aborted || manuallyStopped.has(rKey)) {
+              if (!isCurrentLifecycle() || abort.signal.aborted || manuallyStopped.has(rKey)) {
                 return;
               }
               const message = "channel exited without an error";
@@ -519,18 +535,25 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
             })
             .catch((err) => {
               const message = formatErrorMessage(err);
-              setRuntime(channelId, id, { accountId: id, lastError: message });
+              if (isCurrentLifecycle()) {
+                setRuntime(channelId, id, { accountId: id, lastError: message });
+              }
               log.error?.(`[${id}] channel exited: ${message}`);
             })
             .finally(async () => {
               await cleanupTaskScopedApprovalRuntime("channel cleanup failed");
-              setRuntime(channelId, id, {
-                accountId: id,
-                running: false,
-                lastStopAt: Date.now(),
-              });
+              if (isCurrentLifecycle()) {
+                setRuntime(channelId, id, {
+                  accountId: id,
+                  running: false,
+                  lastStopAt: Date.now(),
+                });
+              }
             })
             .then(async () => {
+              if (!isCurrentLifecycle()) {
+                return;
+              }
               if (manuallyStopped.has(rKey)) {
                 return;
               }
@@ -613,7 +636,11 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
     await startChannelInternal(channelId, accountId);
   };
 
-  const stopChannel = async (channelId: ChannelId, accountId?: string) => {
+  const stopChannel = async (
+    channelId: ChannelId,
+    accountId?: string,
+    opts: StopChannelOptions = {},
+  ) => {
     const plugin = getChannelPlugin(channelId);
     const store = getStore(channelId);
     // Fast path: nothing running and no explicit plugin shutdown hook to run.
@@ -660,9 +687,31 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
           CHANNEL_STOP_ABORT_TIMEOUT_MS,
         );
         if (!stoppedCleanly) {
+          const forceRetireOnTimeout = opts.forceRetireOnTimeout === true;
           log.warn?.(
-            `[${id}] channel stop exceeded ${CHANNEL_STOP_ABORT_TIMEOUT_MS}ms after abort; continuing shutdown`,
+            `[${id}] channel stop exceeded ${CHANNEL_STOP_ABORT_TIMEOUT_MS}ms after abort; ${
+              forceRetireOnTimeout ? "force-retiring stale lifecycle" : "continuing shutdown"
+            }`,
           );
+          if (forceRetireOnTimeout) {
+            if (store.aborts.get(id) === abort) {
+              store.aborts.delete(id);
+            }
+            if (store.tasks.get(id) === task) {
+              store.tasks.delete(id);
+            }
+            setRuntime(channelId, id, {
+              accountId: id,
+              running: false,
+              connected: false,
+              restartPending: false,
+              busy: false,
+              activeRuns: 0,
+              lastStopAt: Date.now(),
+              lastError: `channel stop timed out after ${CHANNEL_STOP_ABORT_TIMEOUT_MS}ms; stale lifecycle force-retired`,
+            });
+            return;
+          }
           setRuntime(channelId, id, {
             accountId: id,
             running: true,
