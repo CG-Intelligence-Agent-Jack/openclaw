@@ -715,7 +715,11 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
             const cleanupRetiredTask = store.taskCleanups.get(id);
             if (cleanupRetiredTask) {
               store.taskCleanups.delete(id);
-              await cleanupRetiredTask();
+              void cleanupRetiredTask().catch((error) => {
+                log.error?.(
+                  `[${id}] retired channel lifecycle cleanup failed: ${formatErrorMessage(error)}`,
+                );
+              });
             }
             setRuntime(channelId, id, {
               accountId: id,

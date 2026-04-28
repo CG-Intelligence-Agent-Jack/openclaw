@@ -309,6 +309,7 @@ describe("server-channels auto restart", () => {
 
   it("force-retires a hung channel task so recovery can start a fresh lifecycle", async () => {
     const statusSetters: Array<(next: ChannelAccountSnapshot) => void> = [];
+    const runtimeContextRegistrations: Array<(context: unknown) => void> = [];
     const channelRuntime = createRuntimeChannel();
     const contextKey = {
       channelId: "discord",
@@ -319,6 +320,12 @@ describe("server-channels auto restart", () => {
       async ({ setStatus, channelRuntime }: ChannelGatewayContext<TestAccount>) => {
         const lifecycle = statusSetters.length + 1;
         statusSetters.push(setStatus);
+        runtimeContextRegistrations.push((context) => {
+          channelRuntime?.runtimeContexts.register({
+            ...contextKey,
+            context,
+          });
+        });
         channelRuntime?.runtimeContexts.register({
           ...contextKey,
           context: { lifecycle },
@@ -353,6 +360,8 @@ describe("server-channels auto restart", () => {
 
     await manager.startChannel("discord", DEFAULT_ACCOUNT_ID);
     await Promise.resolve();
+    expect(channelRuntime.runtimeContexts.get(contextKey)).toEqual({ lifecycle: 2 });
+    runtimeContextRegistrations[0]?.({ lifecycle: "stale" });
     expect(channelRuntime.runtimeContexts.get(contextKey)).toEqual({ lifecycle: 2 });
 
     expect(startAccount).toHaveBeenCalledTimes(2);
