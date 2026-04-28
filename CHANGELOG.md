@@ -36,6 +36,7 @@ Docs: https://docs.openclaw.ai
 - Channels/Telegram: persist native command metadata on target sessions so topic, helper, and ACP-bound slash commands keep their session metadata attached to the routed conversation. (#57548) Thanks @GaosCode.
 - Channels/native commands: keep validated native slash command replies visible in group chats while preserving explicit owner allowlists for command authorization. (#73672) Thanks @obviyus.
 - Auto-reply/session: carry the tail of user/assistant turns into the freshly-rotated transcript on silent in-reply session resets (compaction failure, role-ordering conflict) so direct-chat continuity survives the rebind. Fixes #70853. (#70898) Thanks @neeravmakwana.
+- Feishu: recreate WebSocket clients with monitor-owned backoff after SDK reconnect exhaustion, preserving heartbeat defaults and shutdown cleanup so persistent connections recover without manual gateway restart. Fixes #52618; duplicate evidence #59753; related #55532, #68766, and #72411. Thanks @schumilin, @alex-xuweilong, @120106835, @sirfengyu, and @tianhaocui.
 
 ## 2026.4.27
 
