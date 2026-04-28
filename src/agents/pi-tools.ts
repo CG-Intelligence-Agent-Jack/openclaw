@@ -49,6 +49,8 @@ import {
 import { cleanToolSchemaForGemini, normalizeToolParameters } from "./pi-tools.schema.js";
 import type { AnyAgentTool } from "./pi-tools.types.js";
 import type { SandboxContext } from "./sandbox.js";
+import { buildSandboxFsMounts } from "./sandbox/fs-paths.js";
+import { isPathInsideContainerRoot, normalizeContainerPath } from "./sandbox/path-utils.js";
 import {
   isSubagentEnvelopeSession,
   resolveSubagentCapabilityStore,
@@ -188,6 +190,23 @@ function isApplyPatchAllowedForModel(params: {
       return false;
     }
     return normalized === normalizedModelId || normalized === normalizedFull;
+  });
+}
+
+function hasWritableSandboxWorkspaceTarget(sandbox: SandboxContext): boolean {
+  if (sandbox.workspaceAccess === "rw") {
+    return true;
+  }
+
+  const workspaceTarget = normalizeContainerPath(sandbox.containerWorkdir);
+  return buildSandboxFsMounts(sandbox).some((mount) => {
+    if (!mount.writable) {
+      return false;
+    }
+    return (
+      isPathInsideContainerRoot(workspaceTarget, mount.containerRoot) ||
+      isPathInsideContainerRoot(mount.containerRoot, workspaceTarget)
+    );
   });
 }
 
@@ -432,7 +451,7 @@ export function createOpenClawCodingTools(options?: {
   });
   const sandboxRoot = sandbox?.workspaceDir;
   const sandboxFsBridge = sandbox?.fsBridge;
-  const allowWorkspaceWrites = sandbox?.workspaceAccess !== "ro";
+  const allowWorkspaceWrites = sandbox ? hasWritableSandboxWorkspaceTarget(sandbox) : true;
   const workspaceRoot = resolveWorkspaceRoot(options?.workspaceDir);
   const workspaceOnly = fsPolicy.workspaceOnly;
   const applyPatchConfig = execConfig.applyPatch;
