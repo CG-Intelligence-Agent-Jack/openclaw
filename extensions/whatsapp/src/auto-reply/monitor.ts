@@ -1,3 +1,4 @@
+import type { GroupMetadata } from "@whiskeysockets/baileys";
 import { resolveAccountEntry } from "openclaw/plugin-sdk/account-core";
 import { resolveInboundDebounceMs } from "openclaw/plugin-sdk/channel-inbound-debounce";
 import { formatCliCommand } from "openclaw/plugin-sdk/cli-runtime";
@@ -200,6 +201,7 @@ export async function monitorWebChannel(
     }>
   >();
   const groupMemberNames = new Map<string, Map<string, string>>();
+  const groupMetadataCache = new Map<string, GroupMetadata>();
   const echoTracker = createEchoTracker({ maxItems: 100, logVerbose });
 
   const sleep =
@@ -232,6 +234,7 @@ export async function monitorWebChannel(
     watchdogCheckMs,
     reconnectPolicy,
     socketTiming,
+    cachedGroupMetadata: async (jid) => groupMetadataCache.get(jid),
     abortSignal,
     sleep,
     isNonRetryableStatus: isNonRetryableWebCloseStatus,
@@ -301,6 +304,7 @@ export async function monitorWebChannel(
               shouldRetryDisconnect: () => !sigintStop && controller.shouldRetryDisconnect(),
               disconnectRetryPolicy: reconnectPolicy,
               disconnectRetryAbortSignal: controller.getDisconnectRetryAbortSignal(),
+              groupMetadataCache,
               onMessage: async (msg: WebInboundMsg) => {
                 const inboundAt = Date.now();
                 controller.noteInbound(inboundAt);

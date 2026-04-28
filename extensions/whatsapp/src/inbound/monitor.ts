@@ -2,6 +2,7 @@ import type {
   AnyMessageContent,
   MiscMessageGenerationOptions,
   proto,
+  GroupMetadata,
   WAMessage,
   WASocket,
 } from "@whiskeysockets/baileys";
@@ -44,6 +45,8 @@ import type { WebInboundMessage, WebListenerCloseReason } from "./types.js";
 
 const LOGGED_OUT_STATUS = DisconnectReason?.loggedOut ?? 401;
 const RECONNECT_IN_PROGRESS_ERROR = "no active socket - reconnection in progress";
+
+export type WhatsAppGroupMetadataCache = Map<string, GroupMetadata>;
 
 function logWhatsAppVerbose(enabled: boolean | undefined, message: string) {
   if (!enabled) {
@@ -97,6 +100,8 @@ export type MonitorWebInboxOptions = {
   };
   /** Abort in-flight reconnect waits when shutdown becomes terminal. */
   disconnectRetryAbortSignal?: AbortSignal;
+  /** Shared group metadata cache kept across reconnects for Baileys and inbound hydration. */
+  groupMetadataCache?: WhatsAppGroupMetadataCache;
 };
 
 export async function attachWebInboxToSocket(
@@ -233,6 +238,7 @@ export async function attachWebInboxToSocket(
       inboundConsoleLog.error(`Failed handling inbound web message: ${String(err)}`);
     },
   });
+  const groupMetadataCache = options.groupMetadataCache ?? new Map<string, GroupMetadata>();
   const groupMetaCache = new Map<
     string,
     { subject?: string; participants?: string[]; expires: number }
@@ -305,6 +311,23 @@ export async function attachWebInboxToSocket(
     }
   };
 
+  const summarizeGroupMeta = async (meta: GroupMetadata) => {
+    const participants =
+      (
+        await Promise.all(
+          meta.participants?.map(async (p) => {
+            const mapped = await resolveInboundJid(p.id);
+            return mapped ?? p.id;
+          }) ?? [],
+        )
+      ).filter(Boolean) ?? [];
+    return {
+      subject: meta.subject,
+      participants,
+      expires: Date.now() + GROUP_META_TTL_MS,
+    };
+  };
+
   const getGroupMeta = async (jid: string) => {
     const cached = groupMetaCache.get(jid);
     if (cached && cached.expires > Date.now()) {
@@ -312,23 +335,21 @@ export async function attachWebInboxToSocket(
     }
     try {
       const meta = await sock.groupMetadata(jid);
-      const participants =
-        (
-          await Promise.all(
-            meta.participants?.map(async (p) => {
-              const mapped = await resolveInboundJid(p.id);
-              return mapped ?? p.id;
-            }) ?? [],
-          )
-        ).filter(Boolean) ?? [];
-      const entry = {
-        subject: meta.subject,
-        participants,
-        expires: Date.now() + GROUP_META_TTL_MS,
-      };
+      groupMetadataCache.set(jid, meta);
+      const entry = await summarizeGroupMeta(meta);
       groupMetaCache.set(jid, entry);
       return entry;
     } catch (err) {
+      const hydrated = groupMetadataCache.get(jid);
+      if (hydrated) {
+        const entry = await summarizeGroupMeta(hydrated);
+        groupMetaCache.set(jid, entry);
+        logWhatsAppVerbose(
+          options.verbose,
+          `Using cached group metadata for ${jid} after fetch failure: ${String(err)}`,
+        );
+        return entry;
+      }
       logWhatsAppVerbose(
         options.verbose,
         `Failed to fetch group metadata for ${jid}: ${String(err)}`,
@@ -720,6 +741,11 @@ export async function attachWebInboxToSocket(
   void (async () => {
     try {
       const groups = await sock.groupFetchAllParticipating();
+      for (const [jid, meta] of Object.entries(groups ?? {})) {
+        if (meta) {
+          groupMetadataCache.set(jid, meta);
+        }
+      }
       logWhatsAppVerbose(
         options.verbose,
         `Hydrated ${Object.keys(groups ?? {}).length} participating groups on connect`,
@@ -773,13 +799,16 @@ export async function attachWebInboxToSocket(
 }
 
 export async function monitorWebInbox(options: MonitorWebInboxOptions) {
+  const groupMetadataCache = options.groupMetadataCache ?? new Map<string, GroupMetadata>();
   const sock = await createWaSocket(false, options.verbose, {
     authDir: options.authDir,
     ...resolveWhatsAppSocketTiming(options.cfg),
+    cachedGroupMetadata: async (jid) => groupMetadataCache.get(jid),
   });
   await waitForWaConnection(sock);
   return attachWebInboxToSocket({
     ...options,
+    groupMetadataCache,
     sock,
   });
 }
