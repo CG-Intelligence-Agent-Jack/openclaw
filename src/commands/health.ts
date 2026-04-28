@@ -2,6 +2,7 @@ import { resolveDefaultAgentId } from "../agents/agent-scope.js";
 import { projectSafeChannelAccountSnapshotFields } from "../channels/account-snapshot-fields.js";
 import { resolveChannelDefaultAccountId } from "../channels/plugins/helpers.js";
 import { listReadOnlyChannelPluginsForConfig } from "../channels/plugins/read-only.js";
+import { buildChannelAccountSnapshot } from "../channels/plugins/status.js";
 import type { ChannelPlugin } from "../channels/plugins/types.plugin.js";
 import type { ChannelAccountSnapshot } from "../channels/plugins/types.public.js";
 import { inspectReadOnlyChannelAccount } from "../channels/read-only-account-inspect.js";
@@ -370,12 +371,34 @@ export async function getHealthSnapshot(params?: {
       const runtimeSnapshot =
         params?.runtimeSnapshot?.channelAccounts[plugin.id]?.[accountId] ??
         (accountId === defaultAccountId ? params?.runtimeSnapshot?.channels[plugin.id] : undefined);
-      const snapshot: ChannelAccountSnapshot = {
-        ...projectSafeChannelAccountSnapshotFields(runtimeSnapshot),
-        accountId,
-        enabled,
-        configured,
-      };
+      let snapshot: ChannelAccountSnapshot;
+      try {
+        const statusSnapshot = await buildChannelAccountSnapshot({
+          plugin,
+          cfg,
+          accountId,
+          runtime: runtimeSnapshot,
+          probe,
+        });
+        snapshot = {
+          ...projectSafeChannelAccountSnapshotFields(runtimeSnapshot),
+          ...statusSnapshot,
+          accountId,
+          enabled: statusSnapshot.enabled ?? enabled,
+          configured: statusSnapshot.configured ?? configured,
+        };
+      } catch (error) {
+        diagnostics.push(
+          `${plugin.id}:${accountId}: failed to build status snapshot (${formatErrorMessage(error)}).`,
+        );
+        snapshot = {
+          ...projectSafeChannelAccountSnapshotFields(runtimeSnapshot),
+          ...projectSafeChannelAccountSnapshotFields(account),
+          accountId,
+          enabled,
+          configured,
+        };
+      }
       if (includeSensitive && probe !== undefined) {
         snapshot.probe = probe;
       }

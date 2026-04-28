@@ -21,6 +21,7 @@ let probeTelegramAccountForTestOverride:
 type TelegramHealthAccount = {
   accountId: string;
   token: string;
+  tokenSource: "config" | "tokenFile" | "env" | "none";
   configured: boolean;
   config: {
     proxy?: string;
@@ -112,13 +113,21 @@ function resolveTelegramAccountForTest(params: {
   };
   const tokenFromConfig =
     typeof merged.botToken === "string" && merged.botToken.trim() ? merged.botToken.trim() : "";
-  const token =
-    tokenFromConfig ||
-    readTokenFromFile(merged.tokenFile) ||
-    (accountId === "default" ? (process.env.TELEGRAM_BOT_TOKEN?.trim() ?? "") : "");
+  const tokenFromFile = readTokenFromFile(merged.tokenFile);
+  const tokenFromEnv =
+    accountId === "default" ? (process.env.TELEGRAM_BOT_TOKEN?.trim() ?? "") : "";
+  const token = tokenFromConfig || tokenFromFile || tokenFromEnv;
+  const tokenSource = tokenFromConfig
+    ? "config"
+    : tokenFromFile
+      ? "tokenFile"
+      : tokenFromEnv
+        ? "env"
+        : "none";
   return {
     accountId,
     token,
+    tokenSource,
     configured: token.length > 0,
     config: {
       ...(typeof merged.proxy === "string" && merged.proxy.trim()
@@ -449,6 +458,8 @@ describe("getHealthSnapshot", () => {
         channels: {
           telegram: {
             accountId: "default",
+            running: true,
+            lastStartAt: 122,
             connected: true,
             lastConnectedAt: 123,
           },
@@ -457,23 +468,35 @@ describe("getHealthSnapshot", () => {
       },
     });
     const telegram = snap.channels.telegram as {
+      running?: boolean;
+      lastStartAt?: number;
       connected?: boolean;
       lastConnectedAt?: number;
+      tokenSource?: string;
       probe?: { ok?: boolean; bot?: { username?: string } };
       accounts?: Record<
         string,
         {
+          running?: boolean;
+          lastStartAt?: number;
           connected?: boolean;
           lastConnectedAt?: number;
+          tokenSource?: string;
           probe?: { ok?: boolean; bot?: { username?: string } };
         }
       >;
     };
 
+    expect(telegram.running).toBe(true);
+    expect(telegram.lastStartAt).toBe(122);
     expect(telegram.connected).toBe(true);
     expect(telegram.lastConnectedAt).toBe(123);
+    expect(telegram.tokenSource).toBe("config");
     expect(telegram.probe?.bot?.username).toBe("runtime_bot");
+    expect(telegram.accounts?.default?.running).toBe(true);
+    expect(telegram.accounts?.default?.lastStartAt).toBe(122);
     expect(telegram.accounts?.default?.connected).toBe(true);
+    expect(telegram.accounts?.default?.tokenSource).toBe("config");
     expect(telegram.accounts?.default?.probe?.ok).toBe(true);
   });
 

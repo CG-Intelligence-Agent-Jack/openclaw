@@ -23,12 +23,16 @@ async function buildSnapshotFromAccount<ResolvedAccount>(params: {
       probe: params.probe,
       audit: params.audit,
     });
-    return normalizeOptionalString(snapshot.accountId)
+    const resolved = normalizeOptionalString(snapshot.accountId)
       ? snapshot
       : {
           ...snapshot,
           accountId: params.accountId,
         };
+    return {
+      ...projectSafeChannelAccountSnapshotFields(params.runtime),
+      ...resolved,
+    };
   }
   const enabled = params.plugin.config.isEnabled
     ? params.plugin.config.isEnabled(params.account, params.cfg)
@@ -42,10 +46,13 @@ async function buildSnapshotFromAccount<ResolvedAccount>(params: {
         ? await params.plugin.config.isConfigured(params.account, params.cfg)
         : undefined;
   return {
+    ...projectSafeChannelAccountSnapshotFields(params.account),
+    ...projectSafeChannelAccountSnapshotFields(params.runtime),
     accountId: params.accountId,
     enabled,
     configured,
-    ...projectSafeChannelAccountSnapshotFields(params.account),
+    ...(params.probe !== undefined ? { probe: params.probe } : {}),
+    ...(params.audit !== undefined ? { audit: params.audit } : {}),
   };
 }
 

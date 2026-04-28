@@ -36,6 +36,16 @@ function readNullableNumber(
   return readNumber(record, key);
 }
 
+function readNullableString(
+  record: Record<string, unknown>,
+  key: string,
+): string | null | undefined {
+  if (record[key] === null) {
+    return null;
+  }
+  return normalizeOptionalString(record[key]);
+}
+
 function readStringArray(record: Record<string, unknown>, key: string): string[] | undefined {
   const value = record[key];
   if (!Array.isArray(value)) {
@@ -217,6 +227,15 @@ export function projectSafeChannelAccountSnapshotFields(
       : {}),
     ...(statusState ? { statusState } : {}),
     ...(healthState ? { healthState } : {}),
+    ...(readNullableNumber(record, "lastStartAt") !== undefined
+      ? { lastStartAt: readNullableNumber(record, "lastStartAt") }
+      : {}),
+    ...(readNullableNumber(record, "lastStopAt") !== undefined
+      ? { lastStopAt: readNullableNumber(record, "lastStopAt") }
+      : {}),
+    ...(readNullableString(record, "lastError") !== undefined
+      ? { lastError: readNullableString(record, "lastError") }
+      : {}),
     ...(readBoolean(record, "busy") !== undefined ? { busy: readBoolean(record, "busy") } : {}),
     ...(readNumber(record, "activeRuns") !== undefined
       ? { activeRuns: readNumber(record, "activeRuns") }
