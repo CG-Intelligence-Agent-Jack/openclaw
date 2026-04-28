@@ -12,6 +12,8 @@ const DISCORD_API_RETRY_DEFAULTS = {
   maxDelayMs: 30_000,
   jitter: 0.1,
 };
+const DISCORD_API_429_FALLBACK_RETRY_AFTER_SECONDS = 60;
+const DISCORD_API_ERROR_DETAIL_MAX_CHARS = 240;
 
 type DiscordApiErrorPayload = {
   message?: string;
@@ -36,6 +38,22 @@ function parseDiscordApiErrorPayload(text: string): DiscordApiErrorPayload | nul
   return null;
 }
 
+function parseRetryAfterHeaderSeconds(response: Response): number | undefined {
+  const header = response.headers.get("Retry-After");
+  if (!header) {
+    return undefined;
+  }
+  const seconds = Number(header);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return seconds;
+  }
+  const retryAt = Date.parse(header);
+  if (!Number.isFinite(retryAt)) {
+    return undefined;
+  }
+  return Math.max(0, (retryAt - Date.now()) / 1000);
+}
+
 function parseRetryAfterSeconds(text: string, response: Response): number | undefined {
   const payload = parseDiscordApiErrorPayload(text);
   const retryAfter =
@@ -45,12 +63,7 @@ function parseRetryAfterSeconds(text: string, response: Response): number | unde
   if (retryAfter !== undefined) {
     return retryAfter;
   }
-  const header = response.headers.get("Retry-After");
-  if (!header) {
-    return undefined;
-  }
-  const parsed = Number(header);
-  return Number.isFinite(parsed) ? parsed : undefined;
+  return parseRetryAfterHeaderSeconds(response);
 }
 
 function formatRetryAfterSeconds(value: number | undefined): string | undefined {
@@ -61,7 +74,33 @@ function formatRetryAfterSeconds(value: number | undefined): string | undefined 
   return `${rounded}s`;
 }
 
-function formatDiscordApiErrorText(text: string): string | undefined {
+function summarizeNonJsonDiscordApiErrorText(text: string): string | undefined {
+  const withoutTags = text
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!withoutTags) {
+    return undefined;
+  }
+  return withoutTags.slice(0, DISCORD_API_ERROR_DETAIL_MAX_CHARS);
+}
+
+function isHtmlDiscordApiErrorText(text: string, response: Response): boolean {
+  const contentType = response.headers.get("content-type") ?? "";
+  return (
+    /\bhtml\b/i.test(contentType) ||
+    /^\s*<!doctype\s+html\b/i.test(text) ||
+    /^\s*<html\b/i.test(text)
+  );
+}
+
+function formatDiscordApiErrorText(text: string, response: Response): string | undefined {
   const trimmed = text.trim();
   if (!trimmed) {
     return undefined;
@@ -69,7 +108,17 @@ function formatDiscordApiErrorText(text: string): string | undefined {
   const payload = parseDiscordApiErrorPayload(trimmed);
   if (!payload) {
     const looksJson = trimmed.startsWith("{") && trimmed.endsWith("}");
-    return looksJson ? "unknown error" : trimmed;
+    if (looksJson) {
+      return "unknown error";
+    }
+    if (isHtmlDiscordApiErrorText(trimmed, response)) {
+      const summary = summarizeNonJsonDiscordApiErrorText(trimmed);
+      if (!summary) {
+        return response.status === 429 ? "rate limited by Discord upstream" : undefined;
+      }
+      return response.status === 429 ? `rate limited by Discord upstream: ${summary}` : summary;
+    }
+    return trimmed.slice(0, DISCORD_API_ERROR_DETAIL_MAX_CHARS);
   }
   const message =
     typeof payload.message === "string" && payload.message.trim()
@@ -116,9 +165,12 @@ export async function fetchDiscord<T>(
       });
       if (!res.ok) {
         const text = await res.text().catch(() => "");
-        const detail = formatDiscordApiErrorText(text);
+        const detail = formatDiscordApiErrorText(text, res);
         const suffix = detail ? `: ${detail}` : "";
-        const retryAfter = res.status === 429 ? parseRetryAfterSeconds(text, res) : undefined;
+        const retryAfter =
+          res.status === 429
+            ? (parseRetryAfterSeconds(text, res) ?? DISCORD_API_429_FALLBACK_RETRY_AFTER_SECONDS)
+            : undefined;
         throw new DiscordApiError(
           `Discord API ${path} failed (${res.status})${suffix}`,
           res.status,

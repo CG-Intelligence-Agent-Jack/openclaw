@@ -125,6 +125,43 @@ describe("SafeGatewayPlugin.connect()", () => {
     );
   });
 
+  it("uses default gateway metadata for Cloudflare HTML rate limits without logging raw HTML", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("<html><title>Error 1015</title><body>rate limited</body></html>", {
+        status: 429,
+        headers: { "content-type": "text/html" },
+      }),
+    );
+    const runtime = {
+      log: vi.fn(),
+      error: vi.fn(),
+      exit: vi.fn(),
+    };
+    const registerClient = vi.fn();
+    const plugin = createDiscordGatewayPlugin({
+      discordConfig: {},
+      runtime,
+      __testing: { registerClient },
+    });
+
+    try {
+      await plugin.registerClient({ options: { token: "test" } } as Parameters<
+        typeof plugin.registerClient
+      >[0]);
+    } finally {
+      fetchSpy.mockRestore();
+    }
+
+    expect(registerClient).toHaveBeenCalled();
+    expect((plugin as unknown as { gatewayInfo?: { url?: string } }).gatewayInfo?.url).toBe(
+      "wss://gateway.discord.gg/",
+    );
+    const logs = runtime.log.mock.calls.map((call) => String(call[0])).join("\n");
+    expect(logs).toContain("gateway metadata lookup failed transiently");
+    expect(logs).toContain("Error 1015");
+    expect(logs).not.toContain("<html");
+  });
+
   it("clears stale firstHeartbeatTimeout before delegating to super when isConnecting=true", () => {
     const plugin = createPlugin();
 

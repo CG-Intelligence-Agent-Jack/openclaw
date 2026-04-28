@@ -93,15 +93,42 @@ export function resolveDiscordGatewayIntents(
 }
 
 function summarizeGatewayResponseBody(body: string): string {
-  const normalized = body.trim().replace(/\s+/g, " ");
+  const normalized = body
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .trim()
+    .replace(/\s+/g, " ");
   if (!normalized) {
     return "<empty>";
   }
   return normalized.slice(0, 240);
 }
 
+function isDiscordGatewayHtmlRateLimitResponse(status: number, body: string): boolean {
+  if (status !== 429) {
+    return false;
+  }
+  const trimmed = body.trim();
+  const normalized = normalizeLowercaseStringOrEmpty(trimmed);
+  return (
+    /^\s*<!doctype\s+html\b/i.test(trimmed) ||
+    /^\s*<html\b/i.test(trimmed) ||
+    normalized.includes("error 1015") ||
+    normalized.includes("cloudflare") ||
+    normalized.includes("rate limit")
+  );
+}
+
 function isTransientDiscordGatewayResponse(status: number, body: string): boolean {
   if (status >= 500) {
+    return true;
+  }
+  if (isDiscordGatewayHtmlRateLimitResponse(status, body)) {
     return true;
   }
   const normalized = normalizeLowercaseStringOrEmpty(body);
