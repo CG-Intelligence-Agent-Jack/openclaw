@@ -102,6 +102,15 @@ function isFixedTopLevelBootstrapPath(params: { filePath: string; workspaceDir: 
   );
 }
 
+function isKnownOpenClawCredentialRootPath(filePath: string): boolean {
+  const segments = path.resolve(filePath).split(path.sep).filter(Boolean);
+  return segments.some(
+    (segment, index) =>
+      segment === ".openclaw" &&
+      (segments[index + 1] === "agents" || segments[index + 1] === "credentials"),
+  );
+}
+
 function readExternalFixedBootstrapSymlink(params: {
   filePath: string;
   workspaceDir: string;
@@ -125,6 +134,13 @@ function readExternalFixedBootstrapSymlink(params: {
     targetPath = syncFs.realpathSync(params.filePath);
   } catch (error) {
     return { ok: false, reason: "path", error };
+  }
+
+  if (
+    path.basename(targetPath) !== path.basename(params.filePath) ||
+    isKnownOpenClawCredentialRootPath(targetPath)
+  ) {
+    return { ok: false, reason: "validation" };
   }
 
   const opened = openVerifiedFileSync({

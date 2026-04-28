@@ -429,6 +429,52 @@ describe("loadWorkspaceBootstrapFiles", () => {
     }
   });
 
+  it("rejects fixed bootstrap symlinks to external files with non-bootstrap target names", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-workspace-symlink-"));
+    try {
+      const workspaceDir = path.join(rootDir, "workspace");
+      const outsideDir = path.join(rootDir, ".openclaw", "agents", "main", "agent");
+      await fs.mkdir(workspaceDir, { recursive: true });
+      await fs.mkdir(outsideDir, { recursive: true });
+      const outsideFile = path.join(outsideDir, "auth-profiles.json");
+      await fs.writeFile(outsideFile, '{"version":1}', "utf-8");
+      await fs.symlink(outsideFile, path.join(workspaceDir, DEFAULT_AGENTS_FILENAME));
+
+      const files = await loadWorkspaceBootstrapFiles(workspaceDir);
+      const agents = files.find((file) => file.name === DEFAULT_AGENTS_FILENAME);
+      expect(agents?.missing).toBe(true);
+      expect(agents?.content).toBeUndefined();
+    } finally {
+      await fs.rm(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects fixed bootstrap symlinks into OpenClaw credential roots", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-workspace-symlink-"));
+    try {
+      const workspaceDir = path.join(rootDir, "workspace");
+      const credentialsDir = path.join(rootDir, ".openclaw", "credentials");
+      await fs.mkdir(workspaceDir, { recursive: true });
+      await fs.mkdir(credentialsDir, { recursive: true });
+      const outsideFile = path.join(credentialsDir, DEFAULT_AGENTS_FILENAME);
+      await fs.writeFile(outsideFile, "credential-root bootstrap", "utf-8");
+      await fs.symlink(outsideFile, path.join(workspaceDir, DEFAULT_AGENTS_FILENAME));
+
+      const files = await loadWorkspaceBootstrapFiles(workspaceDir);
+      const agents = files.find((file) => file.name === DEFAULT_AGENTS_FILENAME);
+      expect(agents?.missing).toBe(true);
+      expect(agents?.content).toBeUndefined();
+    } finally {
+      await fs.rm(rootDir, { recursive: true, force: true });
+    }
+  });
+
   it("treats dangling fixed bootstrap symlinks as missing", async () => {
     if (process.platform === "win32") {
       return;
