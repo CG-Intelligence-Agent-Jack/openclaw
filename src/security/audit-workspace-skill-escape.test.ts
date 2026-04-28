@@ -40,7 +40,10 @@ describe("security audit workspace skill path escape findings", () => {
               (entry) => entry.checkId === "skills.workspace.symlink_escape",
             );
             expect(finding?.severity).toBe("warn");
+            expect(finding?.title).toContain("skills directory");
+            expect(finding?.detail).toContain("workspace skills directory");
             expect(finding?.detail).toContain(outsideSkillPath);
+            expect(finding?.remediation).toContain("workspace skills directory");
           })()
         : Promise.resolve(),
       (async () => {
@@ -64,6 +67,31 @@ describe("security audit workspace skill path escape findings", () => {
     await Promise.all(runs);
   });
 
+  it.runIf(process.platform !== "win32")(
+    "flags skill symlinks that resolve inside the workspace but outside workspace skills",
+    async () => {
+      const tmp = await tempCases.makeTmpDir("workspace-skill-inside-workspace-escape");
+      const workspaceDir = path.join(tmp, "workspace");
+      const sharedSkillDir = path.join(workspaceDir, "shared-skill");
+      const linkedSkillDir = path.join(workspaceDir, "skills", "linked");
+      await fs.mkdir(linkedSkillDir, { recursive: true });
+      await fs.mkdir(sharedSkillDir, { recursive: true });
+      const sharedSkillPath = path.join(sharedSkillDir, "SKILL.md");
+      await fs.writeFile(sharedSkillPath, "# shared\n", "utf-8");
+      await fs.symlink(sharedSkillPath, path.join(linkedSkillDir, "SKILL.md"));
+
+      const findings = await collectWorkspaceSkillSymlinkEscapeFindings({
+        cfg: { agents: { defaults: { workspace: workspaceDir } } } satisfies OpenClawConfig,
+      });
+
+      const finding = findings.find((entry) => entry.checkId === "skills.workspace.symlink_escape");
+      expect(finding?.severity).toBe("warn");
+      expect(finding?.detail).toContain(sharedSkillPath);
+      expect(finding?.detail).toContain("workspace skills directory");
+      expect(finding?.remediation).toContain("workspace skills directory");
+    },
+  );
+
   it("treats an unresolvable realpath (timeout/error simulation) as a potential symlink escape", async () => {
     const tmp = await tempCases.makeTmpDir("workspace-skill-realpath-unresolvable");
     const workspaceDir = path.join(tmp, "workspace");
@@ -76,7 +104,7 @@ describe("security audit workspace skill path escape findings", () => {
     // realpathWithTimeout to fire. The .catch(() => null) inside the helper
     // converts any rejection to null, which is the same signal produced by a
     // genuine timeout. All other paths resolve to their string value so the BFS
-    // and workspace-root detection work normally.
+    // and skills-directory detection work normally.
     const realpathSpy = vi
       .spyOn(fs, "realpath")
       .mockImplementation(async (p: unknown): Promise<string> => {
