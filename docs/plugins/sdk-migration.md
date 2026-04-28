@@ -299,6 +299,7 @@ releases.
     | `resolveThinkingDefault` | `api.runtime.agent.resolveThinkingDefault` |
     | `resolveAgentTimeoutMs` | `api.runtime.agent.resolveAgentTimeoutMs` |
     | `ensureAgentWorkspace` | `api.runtime.agent.ensureAgentWorkspace` |
+    | embedded-run abort/observe helpers | `api.runtime.agent.abortEmbeddedAgentRun`, `api.runtime.agent.isEmbeddedAgentRunActive`, `api.runtime.agent.isEmbeddedAgentRunStreaming`, `api.runtime.agent.resolveActiveEmbeddedAgentRunSessionId`, `api.runtime.agent.waitForEmbeddedAgentRunEnd` |
     | session store helpers | `api.runtime.agent.session.*` |
 
   </Step>

@@ -15,6 +15,15 @@ const loadEmbeddedPiRuntime = createLazyRuntimeModule(
   () => import("./runtime-embedded-pi.runtime.js"),
 );
 
+type RuntimeAgentEmbeddedKey =
+  | "abortEmbeddedAgentRun"
+  | "isEmbeddedAgentRunActive"
+  | "isEmbeddedAgentRunStreaming"
+  | "resolveActiveEmbeddedAgentRunSessionId"
+  | "runEmbeddedAgent"
+  | "runEmbeddedPiAgent"
+  | "waitForEmbeddedAgentRunEnd";
+
 export function createRuntimeAgent(): PluginRuntime["agent"] {
   const agentRuntime = {
     defaults: {
@@ -38,14 +47,35 @@ export function createRuntimeAgent(): PluginRuntime["agent"] {
     },
     resolveAgentTimeoutMs,
     ensureAgentWorkspace,
-  } satisfies Omit<PluginRuntime["agent"], "runEmbeddedAgent" | "runEmbeddedPiAgent" | "session"> &
-    Partial<Pick<PluginRuntime["agent"], "runEmbeddedAgent" | "runEmbeddedPiAgent" | "session">>;
+  } satisfies Omit<PluginRuntime["agent"], RuntimeAgentEmbeddedKey | "session"> &
+    Partial<Pick<PluginRuntime["agent"], RuntimeAgentEmbeddedKey | "session">>;
 
+  defineCachedValue(agentRuntime, "abortEmbeddedAgentRun", () =>
+    createLazyRuntimeMethod(loadEmbeddedPiRuntime, (runtime) => runtime.abortEmbeddedAgentRun),
+  );
+  defineCachedValue(agentRuntime, "isEmbeddedAgentRunActive", () =>
+    createLazyRuntimeMethod(loadEmbeddedPiRuntime, (runtime) => runtime.isEmbeddedAgentRunActive),
+  );
+  defineCachedValue(agentRuntime, "isEmbeddedAgentRunStreaming", () =>
+    createLazyRuntimeMethod(
+      loadEmbeddedPiRuntime,
+      (runtime) => runtime.isEmbeddedAgentRunStreaming,
+    ),
+  );
+  defineCachedValue(agentRuntime, "resolveActiveEmbeddedAgentRunSessionId", () =>
+    createLazyRuntimeMethod(
+      loadEmbeddedPiRuntime,
+      (runtime) => runtime.resolveActiveEmbeddedAgentRunSessionId,
+    ),
+  );
   defineCachedValue(agentRuntime, "runEmbeddedAgent", () =>
     createLazyRuntimeMethod(loadEmbeddedPiRuntime, (runtime) => runtime.runEmbeddedAgent),
   );
   defineCachedValue(agentRuntime, "runEmbeddedPiAgent", () =>
     createLazyRuntimeMethod(loadEmbeddedPiRuntime, (runtime) => runtime.runEmbeddedPiAgent),
+  );
+  defineCachedValue(agentRuntime, "waitForEmbeddedAgentRunEnd", () =>
+    createLazyRuntimeMethod(loadEmbeddedPiRuntime, (runtime) => runtime.waitForEmbeddedAgentRunEnd),
   );
   defineCachedValue(agentRuntime, "session", () => ({
     resolveStorePath,

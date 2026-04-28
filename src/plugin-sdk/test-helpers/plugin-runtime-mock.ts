@@ -135,6 +135,18 @@ export function createPluginRuntimeMock(overrides: DeepPartial<PluginRuntime> = 
           { id: "high", label: "high" },
         ],
       })) as unknown as PluginRuntime["agent"]["resolveThinkingPolicy"],
+      abortEmbeddedAgentRun: vi.fn(
+        () => false,
+      ) as unknown as PluginRuntime["agent"]["abortEmbeddedAgentRun"],
+      isEmbeddedAgentRunActive: vi.fn(
+        () => false,
+      ) as unknown as PluginRuntime["agent"]["isEmbeddedAgentRunActive"],
+      isEmbeddedAgentRunStreaming: vi.fn(
+        () => false,
+      ) as unknown as PluginRuntime["agent"]["isEmbeddedAgentRunStreaming"],
+      resolveActiveEmbeddedAgentRunSessionId: vi.fn(
+        () => undefined,
+      ) as unknown as PluginRuntime["agent"]["resolveActiveEmbeddedAgentRunSessionId"],
       runEmbeddedPiAgent: vi.fn().mockResolvedValue({
         payloads: [],
         meta: {},
@@ -143,6 +155,9 @@ export function createPluginRuntimeMock(overrides: DeepPartial<PluginRuntime> = 
         payloads: [],
         meta: {},
       }) as unknown as PluginRuntime["agent"]["runEmbeddedAgent"],
+      waitForEmbeddedAgentRunEnd: vi
+        .fn()
+        .mockResolvedValue(true) as unknown as PluginRuntime["agent"]["waitForEmbeddedAgentRunEnd"],
       resolveAgentTimeoutMs: vi.fn(
         () => 30_000,
       ) as unknown as PluginRuntime["agent"]["resolveAgentTimeoutMs"],

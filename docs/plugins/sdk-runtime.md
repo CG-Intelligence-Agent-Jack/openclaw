@@ -104,6 +104,20 @@ Provider and channel execution paths must use the active runtime config snapshot
 
     `runEmbeddedAgent(...)` is the neutral helper for starting a normal OpenClaw agent turn from plugin code. It uses the same provider/model resolution and agent-harness selection as channel-triggered replies.
 
+    Plugins that own an embedded run can cancel or observe it through the same neutral runtime namespace:
+
+    ```typescript
+    const activeSessionId =
+      api.runtime.agent.resolveActiveEmbeddedAgentRunSessionId("my-plugin:task-1");
+
+    if (activeSessionId && api.runtime.agent.isEmbeddedAgentRunActive(activeSessionId)) {
+      api.runtime.agent.abortEmbeddedAgentRun(activeSessionId);
+      await api.runtime.agent.waitForEmbeddedAgentRunEnd(activeSessionId, 15_000);
+    }
+    ```
+
+    `isEmbeddedAgentRunStreaming(...)` reports whether the active run is currently accepting streamed follow-up input.
+
     `runEmbeddedPiAgent(...)` remains as a compatibility alias.
 
     `resolveThinkingPolicy(...)` returns the provider/model's supported thinking levels and optional default. Provider plugins own the model-specific profile through their thinking hooks, so tool plugins should call this runtime helper instead of importing or duplicating provider lists.

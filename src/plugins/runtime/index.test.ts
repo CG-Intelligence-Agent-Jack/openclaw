@@ -221,8 +221,13 @@ describe("plugin runtime command execution", () => {
           provider: DEFAULT_PROVIDER,
         });
         expectFunctionKeys(runtime.agent as Record<string, unknown>, [
+          "abortEmbeddedAgentRun",
+          "isEmbeddedAgentRunActive",
+          "isEmbeddedAgentRunStreaming",
+          "resolveActiveEmbeddedAgentRunSessionId",
           "runEmbeddedAgent",
           "runEmbeddedPiAgent",
+          "waitForEmbeddedAgentRunEnd",
           "normalizeThinkingLevel",
           "resolveThinkingPolicy",
           "resolveAgentDir",
