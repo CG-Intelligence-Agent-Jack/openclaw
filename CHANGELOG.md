@@ -12,6 +12,7 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- TUI/status: clear stale `streaming` footer state when a final event arrives after the active run was already cleared and no tracked runs remain, while preserving concurrent-run ownership and inactive local `/btw` terminal handling. Fixes #64825; carries forward #64842, #64843, #64847, and #64862. Thanks @briandevans and @Yanhu007.
 - NVIDIA/NIM: persist the `NVIDIA_API_KEY` provider marker and mark bundled NVIDIA Chat Completions models as string-content compatible, so NIM models load from `models.json` and OpenAI-compatible subagent calls send plain text content. Fixes #73013 and #50107; refs #73014. Thanks @bautrey, @iot2edge, @ifearghal, and @futhgar.
 - Channels/Discord: let text-only configs drop the `GuildVoiceStates` gateway intent and expose a bounded `/gateway/bot` metadata timeout with rate-limited fallback logs, reducing idle CPU and warning floods. Fixes #73709 and #73585. Thanks @sanchezm86 and @trac3r00.
 - CLI/plugins: use plugin metadata snapshots for install slot selection and add opt-in plugin lifecycle timing traces, so plugin install avoids runtime-loading the plugin registry for metadata-only decisions. Thanks @shakkernerd.
