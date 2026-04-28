@@ -169,6 +169,43 @@ describe("subagent registry query regressions", () => {
     expect(getSubagentRunByChildSessionKeyFromRuns(runs, childSessionKey)?.runId).toBe("run-ended");
   });
 
+  it("does not treat cleanup-handled unended child rows as active", () => {
+    const now = Date.now();
+    const childSessionKey = "agent:main:subagent:cleanup-handled-unended";
+    const runs = toRunMap([
+      makeRun({
+        runId: "run-cleanup-handled",
+        childSessionKey,
+        createdAt: now - 1_000,
+        startedAt: now - 900,
+        cleanupHandled: true,
+      }),
+    ]);
+
+    expect(isSubagentSessionRunActiveFromRuns(runs, childSessionKey)).toBe(false);
+    expect(countActiveRunsForSessionFromRuns(runs, "agent:main:main")).toBe(0);
+  });
+
+  it("does not keep mounted attachment child links after cleanup completion", () => {
+    const now = Date.now();
+    const childSessionKey = "agent:main:subagent:mounted-cleanup";
+    const runs = toRunMap([
+      makeRun({
+        runId: "run-mounted-cleanup",
+        childSessionKey,
+        createdAt: now - 1_000,
+        startedAt: now - 900,
+        cleanupCompletedAt: now - 100,
+        attachmentsRootDir: "/tmp/openclaw-attachments",
+        attachmentsDir: "/tmp/openclaw-attachments/child",
+        retainAttachmentsOnKeep: true,
+      }),
+    ]);
+
+    expect(isSubagentSessionRunActiveFromRuns(runs, childSessionKey)).toBe(false);
+    expect(countActiveRunsForSessionFromRuns(runs, "agent:main:main")).toBe(0);
+  });
+
   it("regression descendant count gating, pending descendants block announce until cleanup completion is recorded", () => {
     // Regression guard: parent announce must defer while any descendant cleanup is still pending.
     const parentSessionKey = "agent:main:subagent:parent";

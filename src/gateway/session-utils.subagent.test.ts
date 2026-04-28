@@ -964,6 +964,66 @@ describe("listSessionsFromStore subagent metadata", () => {
     expect(filtered.sessions.map((session) => session.key)).toEqual([]);
   });
 
+  test("does not expose cleanup-handled completed mounted subagents as active children", () => {
+    const now = Date.now();
+    const childSessionKey = "agent:main:subagent:mounted-completed";
+    const store: Record<string, SessionEntry> = {
+      "agent:main:main": {
+        sessionId: "sess-main",
+        updatedAt: now,
+      } as SessionEntry,
+      [childSessionKey]: {
+        sessionId: "sess-mounted-completed",
+        updatedAt: now - 500,
+        spawnedBy: "agent:main:main",
+        status: "done",
+        startedAt: now - 5_000,
+        endedAt: now - 1_000,
+        runtimeMs: 4_000,
+      } as SessionEntry,
+    };
+
+    addSubagentRunForTests({
+      runId: "run-mounted-completed",
+      childSessionKey,
+      controllerSessionKey: "agent:main:main",
+      requesterSessionKey: "agent:main:main",
+      requesterDisplayKey: "main",
+      task: "mounted completed task",
+      cleanup: "keep",
+      createdAt: now - 5_000,
+      startedAt: now - 4_500,
+      cleanupHandled: true,
+      attachmentsRootDir: "/tmp/openclaw-attachments",
+      attachmentsDir: "/tmp/openclaw-attachments/mounted-completed",
+      retainAttachmentsOnKeep: true,
+    });
+
+    const all = listSessionsFromStore({
+      cfg,
+      storePath: "/tmp/sessions.json",
+      store,
+      opts: {},
+    });
+    const main = all.sessions.find((session) => session.key === "agent:main:main");
+    const child = all.sessions.find((session) => session.key === childSessionKey);
+
+    expect(main?.childSessions).toBeUndefined();
+    expect(child?.status).toBe("done");
+    expect(child?.subagentRunState).toBe("historical");
+    expect(child?.hasActiveSubagentRun).toBe(false);
+
+    const filtered = listSessionsFromStore({
+      cfg,
+      storePath: "/tmp/sessions.json",
+      store,
+      opts: {
+        spawnedBy: "agent:main:main",
+      },
+    });
+    expect(filtered.sessions.map((session) => session.key)).toEqual([]);
+  });
+
   test("keeps ended parents attached while live descendants are still running", () => {
     const now = Date.now();
     const parentKey = "agent:main:subagent:ended-parent";

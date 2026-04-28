@@ -6,10 +6,25 @@ export const RECENT_ENDED_SUBAGENT_CHILD_SESSION_MS = 30 * 60 * 1_000;
 const EXPLICIT_TIMEOUT_STALE_GRACE_MS = 60_000;
 const MIN_REALISTIC_RUN_TIMESTAMP_MS = Date.UTC(2020, 0, 1);
 
+type SubagentRunLivenessRecord = Pick<
+  SubagentRunRecord,
+  "createdAt" | "startedAt" | "sessionStartedAt" | "endedAt" | "runTimeoutSeconds"
+> &
+  Partial<Pick<SubagentRunRecord, "cleanupCompletedAt" | "cleanupHandled">>;
+
 export function hasSubagentRunEnded<T extends Pick<SubagentRunRecord, "endedAt">>(
   entry: T,
 ): entry is T & { endedAt: number } {
   return typeof entry.endedAt === "number" && Number.isFinite(entry.endedAt);
+}
+
+export function hasSubagentRunCleanupFinished(
+  entry: Partial<Pick<SubagentRunRecord, "cleanupCompletedAt" | "cleanupHandled">>,
+): boolean {
+  return (
+    (typeof entry.cleanupCompletedAt === "number" && Number.isFinite(entry.cleanupCompletedAt)) ||
+    entry.cleanupHandled === true
+  );
 }
 
 function resolveStaleCutoffMs(entry: Pick<SubagentRunRecord, "runTimeoutSeconds">): number {
@@ -24,13 +39,10 @@ function resolveStaleCutoffMs(entry: Pick<SubagentRunRecord, "runTimeoutSeconds"
 }
 
 export function isStaleUnendedSubagentRun(
-  entry: Pick<
-    SubagentRunRecord,
-    "createdAt" | "startedAt" | "sessionStartedAt" | "endedAt" | "runTimeoutSeconds"
-  >,
+  entry: SubagentRunLivenessRecord,
   now = Date.now(),
 ): boolean {
-  if (hasSubagentRunEnded(entry)) {
+  if (hasSubagentRunEnded(entry) || hasSubagentRunCleanupFinished(entry)) {
     return false;
   }
   const startedAt = getSubagentSessionStartedAt(entry);
@@ -45,13 +57,14 @@ export function isStaleUnendedSubagentRun(
 }
 
 export function isLiveUnendedSubagentRun(
-  entry: Pick<
-    SubagentRunRecord,
-    "createdAt" | "startedAt" | "sessionStartedAt" | "endedAt" | "runTimeoutSeconds"
-  >,
+  entry: SubagentRunLivenessRecord,
   now = Date.now(),
 ): boolean {
-  return !hasSubagentRunEnded(entry) && !isStaleUnendedSubagentRun(entry, now);
+  return (
+    !hasSubagentRunEnded(entry) &&
+    !hasSubagentRunCleanupFinished(entry) &&
+    !isStaleUnendedSubagentRun(entry, now)
+  );
 }
 
 export function isRecentlyEndedSubagentRun(
@@ -66,10 +79,7 @@ export function isRecentlyEndedSubagentRun(
 }
 
 export function shouldKeepSubagentRunChildLink(
-  entry: Pick<
-    SubagentRunRecord,
-    "createdAt" | "startedAt" | "sessionStartedAt" | "endedAt" | "runTimeoutSeconds"
-  >,
+  entry: SubagentRunLivenessRecord,
   options?: {
     activeDescendants?: number;
     now?: number;
