@@ -70,7 +70,7 @@ describe("isBotMentionedFromTargets", () => {
     expectMentioned(msg, mentionCfg, true);
   });
 
-  it("ignores JID mentions in self-chat mode", () => {
+  it("honors self JID mentions before self-chat fallback", () => {
     const cfg = { mentionRegexes: [/\bopenclaw\b/i], allowFrom: ["+999"] };
     const msg = makeMsg({
       body: "@owner ping",
@@ -78,7 +78,7 @@ describe("isBotMentionedFromTargets", () => {
       selfE164: "+999",
       selfJid: "999@s.whatsapp.net",
     });
-    expectMentioned(msg, cfg, false);
+    expectMentioned(msg, cfg, true);
 
     const msgTextMention = makeMsg({
       body: "openclaw ping",
@@ -100,7 +100,7 @@ describe("isBotMentionedFromTargets", () => {
       selfE164: "+999",
       selfJid: "999@s.whatsapp.net",
     });
-    expectMentioned(msg, cfg, false);
+    expectMentioned(msg, cfg, true);
   });
 
   it("matches fallback number mentions when regexes do not match", () => {
