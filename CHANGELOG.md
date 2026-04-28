@@ -8,6 +8,7 @@ Docs: https://docs.openclaw.ai
 
 - iOS/Gateway: add an authenticated `node.presence.alive` protocol event and `node.list` last-seen fields so background iOS wakes can mark paired nodes recently alive without treating them as connected. Carries forward #63123. Thanks @ngutman.
 - Gateway/chat: accept non-image attachments through `chat.send` by staging them as agent-readable media paths, while keeping unsupported RPC attachment paths explicit instead of silently dropping files. Fixes #48123. (#67572) Thanks @samzong.
+- Channels/WhatsApp: support explicit WhatsApp Channel/Newsletter `@newsletter` outbound message targets with channel session metadata instead of DM routing. Fixes #13417; carries forward the narrow target idea from #13424 while addressing routing/session review concerns; refs #62697. Thanks @agentz-manfred.
 - Security/networking: add opt-in operator-managed outbound proxy routing (proxy.enabled + proxy.proxyUrl/OPENCLAW_PROXY_URL) with strict http:// forward-proxy validation, loopback-only Gateway bypass, and cleanup of proxy env/dispatcher state on exit. (#70044) Thanks @jesse-merhi and @joshavant.
 
 ### Fixes

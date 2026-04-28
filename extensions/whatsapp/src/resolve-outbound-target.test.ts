@@ -130,6 +130,25 @@ describe("resolveWhatsAppOutboundTarget", () => {
     });
   });
 
+  describe("newsletter JID handling", () => {
+    it("returns success for valid newsletter JID without applying DM allowFrom", () => {
+      vi.mocked(normalize.normalizeWhatsAppTarget).mockReturnValueOnce(
+        "120363123456789@newsletter",
+      );
+      vi.mocked(normalize.isWhatsAppGroupJid).mockReturnValueOnce(false);
+      vi.mocked(normalize.isWhatsAppNewsletterJid).mockReturnValueOnce(true);
+
+      expectResolutionOk(
+        {
+          to: "120363123456789@newsletter",
+          allowFrom: [SECONDARY_TARGET],
+          mode: "implicit",
+        },
+        "120363123456789@newsletter",
+      );
+    });
+  });
+
   describe("implicit/heartbeat mode with allowList", () => {
     it("allows message when wildcard is present", () => {
       mockNormalizedDirectMessage(PRIMARY_TARGET, PRIMARY_TARGET);

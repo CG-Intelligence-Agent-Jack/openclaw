@@ -1,5 +1,9 @@
 import { missingTargetError } from "openclaw/plugin-sdk/channel-feedback";
-import { isWhatsAppGroupJid, normalizeWhatsAppTarget } from "./normalize-target.js";
+import {
+  isWhatsAppGroupJid,
+  isWhatsAppNewsletterJid,
+  normalizeWhatsAppTarget,
+} from "./normalize-target.js";
 
 export type WhatsAppOutboundTargetResolution =
   | { ok: true; to: string }
@@ -29,10 +33,10 @@ export function resolveWhatsAppOutboundTarget(params: {
     if (!normalizedTo) {
       return {
         ok: false,
-        error: missingTargetError("WhatsApp", "<E.164|group JID>"),
+        error: missingTargetError("WhatsApp", "<E.164|group JID|newsletter JID>"),
       };
     }
-    if (isWhatsAppGroupJid(normalizedTo)) {
+    if (isWhatsAppGroupJid(normalizedTo) || isWhatsAppNewsletterJid(normalizedTo)) {
       return { ok: true, to: normalizedTo };
     }
     if (hasWildcard || allowList.length === 0) {
@@ -49,6 +53,6 @@ export function resolveWhatsAppOutboundTarget(params: {
 
   return {
     ok: false,
-    error: missingTargetError("WhatsApp", "<E.164|group JID>"),
+    error: missingTargetError("WhatsApp", "<E.164|group JID|newsletter JID>"),
   };
 }
