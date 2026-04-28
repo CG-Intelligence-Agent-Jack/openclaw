@@ -309,19 +309,33 @@ describe("server-channels auto restart", () => {
 
   it("force-retires a hung channel task so recovery can start a fresh lifecycle", async () => {
     const statusSetters: Array<(next: ChannelAccountSnapshot) => void> = [];
-    const startAccount = vi.fn(async ({ setStatus }: ChannelGatewayContext<TestAccount>) => {
-      statusSetters.push(setStatus);
-      await new Promise<void>(() => {});
-    });
+    const channelRuntime = createRuntimeChannel();
+    const contextKey = {
+      channelId: "discord",
+      accountId: DEFAULT_ACCOUNT_ID,
+      capability: "test-lifecycle",
+    };
+    const startAccount = vi.fn(
+      async ({ setStatus, channelRuntime }: ChannelGatewayContext<TestAccount>) => {
+        const lifecycle = statusSetters.length + 1;
+        statusSetters.push(setStatus);
+        channelRuntime?.runtimeContexts.register({
+          ...contextKey,
+          context: { lifecycle },
+        });
+        await new Promise<void>(() => {});
+      },
+    );
     installTestRegistry(
       createTestPlugin({
         startAccount,
       }),
     );
-    const manager = createManager();
+    const manager = createManager({ channelRuntime });
 
     await manager.startChannels();
     await Promise.resolve();
+    expect(channelRuntime.runtimeContexts.get(contextKey)).toEqual({ lifecycle: 1 });
 
     const stopTask = manager.stopChannel("discord", DEFAULT_ACCOUNT_ID, {
       forceRetireOnTimeout: true,
@@ -335,9 +349,11 @@ describe("server-channels auto restart", () => {
     expect(account?.connected).toBe(false);
     expect(account?.activeRuns).toBe(0);
     expect(account?.lastError).toContain("stale lifecycle force-retired");
+    expect(channelRuntime.runtimeContexts.get(contextKey)).toBeUndefined();
 
     await manager.startChannel("discord", DEFAULT_ACCOUNT_ID);
     await Promise.resolve();
+    expect(channelRuntime.runtimeContexts.get(contextKey)).toEqual({ lifecycle: 2 });
 
     expect(startAccount).toHaveBeenCalledTimes(2);
     statusSetters[1]?.({
