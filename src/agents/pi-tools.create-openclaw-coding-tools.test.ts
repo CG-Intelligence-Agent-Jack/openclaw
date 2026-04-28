@@ -649,7 +649,7 @@ describe("createOpenClawCodingTools", () => {
     expect(tools.some((tool) => tool.name === "apply_patch")).toBe(true);
   });
 
-  it("keeps write-capable tools for a writable sandbox workspace bind", () => {
+  it("keeps write-capable tools hidden for writable binds without rw workspace access", () => {
     const sandboxDir = path.join(os.tmpdir(), "openclaw-sandbox");
     const bindDir = path.join(os.tmpdir(), "openclaw-sandbox-bind");
     const sandbox = createPiToolsSandboxContext({
@@ -671,9 +671,9 @@ describe("createOpenClawCodingTools", () => {
       modelId: "gpt-5.4",
     });
     expect(tools.some((tool) => tool.name === "read")).toBe(true);
-    expect(tools.some((tool) => tool.name === "write")).toBe(true);
-    expect(tools.some((tool) => tool.name === "edit")).toBe(true);
-    expect(tools.some((tool) => tool.name === "apply_patch")).toBe(true);
+    expect(tools.some((tool) => tool.name === "write")).toBe(false);
+    expect(tools.some((tool) => tool.name === "edit")).toBe(false);
+    expect(tools.some((tool) => tool.name === "apply_patch")).toBe(false);
   });
 
   it("accepts canonical parameters for read/write/edit", async () => {

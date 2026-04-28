@@ -49,8 +49,6 @@ import {
 import { cleanToolSchemaForGemini, normalizeToolParameters } from "./pi-tools.schema.js";
 import type { AnyAgentTool } from "./pi-tools.types.js";
 import type { SandboxContext } from "./sandbox.js";
-import { buildSandboxFsMounts } from "./sandbox/fs-paths.js";
-import { isPathInsideContainerRoot, normalizeContainerPath } from "./sandbox/path-utils.js";
 import {
   isSubagentEnvelopeSession,
   resolveSubagentCapabilityStore,
@@ -194,20 +192,7 @@ function isApplyPatchAllowedForModel(params: {
 }
 
 function hasWritableSandboxWorkspaceTarget(sandbox: SandboxContext): boolean {
-  if (sandbox.workspaceAccess === "rw") {
-    return true;
-  }
-
-  const workspaceTarget = normalizeContainerPath(sandbox.containerWorkdir);
-  return buildSandboxFsMounts(sandbox).some((mount) => {
-    if (!mount.writable) {
-      return false;
-    }
-    return (
-      isPathInsideContainerRoot(workspaceTarget, mount.containerRoot) ||
-      isPathInsideContainerRoot(mount.containerRoot, workspaceTarget)
-    );
-  });
+  return sandbox.workspaceAccess === "rw";
 }
 
 function resolveExecConfig(params: { cfg?: OpenClawConfig; agentId?: string }) {
