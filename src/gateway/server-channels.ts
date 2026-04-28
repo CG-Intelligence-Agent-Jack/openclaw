@@ -706,20 +706,32 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
             }`,
           );
           if (forceRetireOnTimeout) {
+            const isRetiringCurrentLifecycle =
+              store.aborts.get(id) === abort && store.tasks.get(id) === task;
             if (store.aborts.get(id) === abort) {
               store.aborts.delete(id);
             }
             if (store.tasks.get(id) === task) {
               store.tasks.delete(id);
             }
-            const cleanupRetiredTask = store.taskCleanups.get(id);
+            const cleanupRetiredTask = isRetiringCurrentLifecycle
+              ? store.taskCleanups.get(id)
+              : undefined;
             if (cleanupRetiredTask) {
               store.taskCleanups.delete(id);
+              // The cleanup synchronously disposes scoped runtime leases and disables
+              // approval bootstrap before awaiting slower native teardown.
               void cleanupRetiredTask().catch((error) => {
                 log.error?.(
                   `[${id}] retired channel lifecycle cleanup failed: ${formatErrorMessage(error)}`,
                 );
               });
+            }
+            if (!isRetiringCurrentLifecycle) {
+              log.debug?.(
+                `[${id}] ignored force-retire status update; newer lifecycle already started`,
+              );
+              return;
             }
             setRuntime(channelId, id, {
               accountId: id,
