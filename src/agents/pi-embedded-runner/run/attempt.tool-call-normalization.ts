@@ -13,6 +13,8 @@ import { hasUnredactedSessionsSpawnAttachments } from "../../tool-call-shared.js
 import { normalizeToolName } from "../../tool-policy.js";
 import { shouldAllowProviderOwnedThinkingReplay } from "../../transcript-policy.js";
 import type { TranscriptPolicy } from "../../transcript-policy.js";
+import { log } from "../logger.js";
+import { HARD_MAX_TOOL_RESULT_CHARS } from "../tool-result-truncation.js";
 import { wrapStreamObjectEvents } from "./stream-wrapper.js";
 
 type UnknownToolLoopGuardState = {
@@ -239,6 +241,13 @@ type ReplayToolCallSanitizeReport = {
   droppedAssistantMessages: number;
 };
 
+type PreSendContentBlockSanitizeReport = {
+  messages: AgentMessage[];
+  emptyBlocksDropped: number;
+  oversizedTextBlocksTruncated: number;
+  truncatedChars: number;
+};
+
 type AnthropicToolResultContentBlock = {
   type?: unknown;
   toolUseId?: unknown;
@@ -246,6 +255,127 @@ type AnthropicToolResultContentBlock = {
   tool_use_id?: unknown;
   tool_call_id?: unknown;
 };
+
+function truncatePreSendText(value: string, report: PreSendContentBlockSanitizeReport): string {
+  if (value.length <= HARD_MAX_TOOL_RESULT_CHARS) {
+    return value;
+  }
+  const suffix = `\n\n[openclaw] pre-send sanitizer truncated ${
+    value.length - HARD_MAX_TOOL_RESULT_CHARS
+  } oversized characters before provider replay.`;
+  const keepChars = Math.max(0, HARD_MAX_TOOL_RESULT_CHARS - suffix.length);
+  report.oversizedTextBlocksTruncated += 1;
+  report.truncatedChars += value.length - keepChars;
+  return `${value.slice(0, keepChars)}${suffix}`;
+}
+
+function sanitizePreSendContentBlock(
+  block: unknown,
+  report: PreSendContentBlockSanitizeReport,
+): unknown | null {
+  if (!block || typeof block !== "object") {
+    report.emptyBlocksDropped += 1;
+    return null;
+  }
+  const entries = Object.entries(block as Record<string, unknown>);
+  if (entries.length === 0) {
+    report.emptyBlocksDropped += 1;
+    return null;
+  }
+
+  let changed = false;
+  const next: Record<string, unknown> = { ...(block as Record<string, unknown>) };
+  if (typeof next.text === "string") {
+    const truncated = truncatePreSendText(next.text, report);
+    if (truncated !== next.text) {
+      next.text = truncated;
+      changed = true;
+    }
+  }
+  if (Array.isArray(next.content)) {
+    const sanitizedNested = sanitizePreSendContentBlocks(next.content, report);
+    if (sanitizedNested !== next.content) {
+      next.content = sanitizedNested;
+      changed = true;
+    }
+  }
+
+  const type = typeof next.type === "string" ? next.type : "";
+  if (
+    (type === "text" || type === "input_text" || type === "output_text") &&
+    typeof next.text === "string" &&
+    next.text.trim().length === 0 &&
+    Object.keys(next).every((key) => key === "type" || key === "text")
+  ) {
+    report.emptyBlocksDropped += 1;
+    return null;
+  }
+
+  return changed ? next : block;
+}
+
+function sanitizePreSendContentBlocks(
+  blocks: unknown[],
+  report: PreSendContentBlockSanitizeReport,
+): unknown[] {
+  let changed = false;
+  const next: unknown[] = [];
+  for (const block of blocks) {
+    const sanitized = sanitizePreSendContentBlock(block, report);
+    if (sanitized === null) {
+      changed = true;
+      continue;
+    }
+    if (sanitized !== block) {
+      changed = true;
+    }
+    next.push(sanitized);
+  }
+  return changed ? next : blocks;
+}
+
+function sanitizePreSendContentBlocksInMessages(
+  messages: AgentMessage[],
+): PreSendContentBlockSanitizeReport {
+  const report: PreSendContentBlockSanitizeReport = {
+    messages,
+    emptyBlocksDropped: 0,
+    oversizedTextBlocksTruncated: 0,
+    truncatedChars: 0,
+  };
+  let changed = false;
+  const nextMessages: AgentMessage[] = messages.map((message): AgentMessage => {
+    if (!message || typeof message !== "object") {
+      return message;
+    }
+    const content = (message as { content?: unknown }).content;
+    if (typeof content === "string") {
+      const truncated = truncatePreSendText(content, report);
+      if (truncated !== content) {
+        changed = true;
+        return { ...message, content: truncated } as AgentMessage;
+      }
+      return message;
+    }
+    if (!Array.isArray(content)) {
+      return message;
+    }
+    const nextContent = sanitizePreSendContentBlocks(content, report);
+    if (nextContent === content) {
+      return message;
+    }
+    changed = true;
+    return {
+      ...message,
+      content:
+        nextContent.length > 0
+          ? nextContent
+          : [{ type: "text", text: "[openclaw] empty content omitted before provider replay." }],
+    } as AgentMessage;
+  });
+  report.messages = changed ? nextMessages : messages;
+  return report;
+}
 
 function isThinkingLikeReplayBlock(block: unknown): boolean {
   if (!block || typeof block !== "object") {
@@ -886,12 +1016,16 @@ export function wrapStreamFnSanitizeMalformedToolCalls(
         dropThinkingBlocks: transcriptPolicy?.dropThinkingBlocks === true,
       },
     });
-    const sanitized = sanitizeReplayToolCallInputs(
+    const contentBlockSanitized = sanitizePreSendContentBlocksInMessages(
       messages as AgentMessage[],
+    );
+    const contentBlocksChanged = contentBlockSanitized.messages !== messages;
+    const sanitized = sanitizeReplayToolCallInputs(
+      contentBlockSanitized.messages,
       allowedToolNames,
       allowProviderOwnedThinkingReplay,
     );
-    const replayInputsChanged = sanitized.messages !== messages;
+    const replayInputsChanged = sanitized.messages !== contentBlockSanitized.messages;
     let nextMessages = replayInputsChanged
       ? sanitizeToolUseResultPairing(sanitized.messages)
       : sanitized.messages;
@@ -920,6 +1054,13 @@ export function wrapStreamFnSanitizeMalformedToolCalls(
       if (transcriptPolicy?.validateAnthropicTurns) {
         nextMessages = validateAnthropicTurns(nextMessages);
       }
+    }
+    if (contentBlocksChanged) {
+      log.warn("[pre-send-sanitizer] repaired outbound context before provider replay", {
+        emptyBlocksDropped: contentBlockSanitized.emptyBlocksDropped,
+        oversizedTextBlocksTruncated: contentBlockSanitized.oversizedTextBlocksTruncated,
+        truncatedChars: contentBlockSanitized.truncatedChars,
+      });
     }
     const nextContext = {
       ...(context as unknown as Record<string, unknown>),
