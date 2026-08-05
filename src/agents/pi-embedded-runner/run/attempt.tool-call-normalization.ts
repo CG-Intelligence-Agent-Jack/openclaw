@@ -256,6 +256,14 @@ type AnthropicToolResultContentBlock = {
   tool_call_id?: unknown;
 };
 
+function isToolResultMessageRole(role: unknown): boolean {
+  return role === "toolResult" || role === "tool";
+}
+
+function isToolResultContentBlockType(type: unknown): boolean {
+  return type === "toolResult" || type === "tool" || type === "function_call_output";
+}
+
 function truncatePreSendText(value: string, report: PreSendContentBlockSanitizeReport): string {
   if (value.length <= HARD_MAX_TOOL_RESULT_CHARS) {
     return value;
@@ -272,6 +280,7 @@ function truncatePreSendText(value: string, report: PreSendContentBlockSanitizeR
 function sanitizePreSendContentBlock(
   block: unknown,
   report: PreSendContentBlockSanitizeReport,
+  options?: { truncateOversizedText?: boolean },
 ): unknown | null {
   if (!block || typeof block !== "object") {
     report.emptyBlocksDropped += 1;
@@ -285,7 +294,11 @@ function sanitizePreSendContentBlock(
 
   let changed = false;
   const next: Record<string, unknown> = { ...(block as Record<string, unknown>) };
-  if (typeof next.text === "string") {
+  const type = typeof next.type === "string" ? next.type : "";
+  const truncateOversizedText =
+    options?.truncateOversizedText === true || isToolResultContentBlockType(type);
+
+  if (typeof next.text === "string" && truncateOversizedText) {
     const truncated = truncatePreSendText(next.text, report);
     if (truncated !== next.text) {
       next.text = truncated;
@@ -293,14 +306,16 @@ function sanitizePreSendContentBlock(
     }
   }
   if (Array.isArray(next.content)) {
-    const sanitizedNested = sanitizePreSendContentBlocks(next.content, report);
+    const sanitizedNested = sanitizePreSendContentBlocks(next.content, report, {
+      // Nested content under a tool-result block is tool output and remains truncatable.
+      truncateOversizedText,
+    });
     if (sanitizedNested !== next.content) {
       next.content = sanitizedNested;
       changed = true;
     }
   }
 
-  const type = typeof next.type === "string" ? next.type : "";
   if (
     (type === "text" || type === "input_text" || type === "output_text") &&
     typeof next.text === "string" &&
@@ -317,11 +332,12 @@ function sanitizePreSendContentBlock(
 function sanitizePreSendContentBlocks(
   blocks: unknown[],
   report: PreSendContentBlockSanitizeReport,
+  options?: { truncateOversizedText?: boolean },
 ): unknown[] {
   let changed = false;
   const next: unknown[] = [];
   for (const block of blocks) {
-    const sanitized = sanitizePreSendContentBlock(block, report);
+    const sanitized = sanitizePreSendContentBlock(block, report, options);
     if (sanitized === null) {
       changed = true;
       continue;
@@ -348,8 +364,15 @@ function sanitizePreSendContentBlocksInMessages(
     if (!message || typeof message !== "object") {
       return message;
     }
+    const role = (message as { role?: unknown }).role;
+    // HARD_MAX_TOOL_RESULT_CHARS is a tool-output ceiling only.
+    // Ordinary user/assistant prompt text must never be silently truncated here.
+    const truncateOversizedText = isToolResultMessageRole(role);
     const content = (message as { content?: unknown }).content;
     if (typeof content === "string") {
+      if (!truncateOversizedText) {
+        return message;
+      }
       const truncated = truncatePreSendText(content, report);
       if (truncated !== content) {
         changed = true;
@@ -360,7 +383,7 @@ function sanitizePreSendContentBlocksInMessages(
     if (!Array.isArray(content)) {
       return message;
     }
-    const nextContent = sanitizePreSendContentBlocks(content, report);
+    const nextContent = sanitizePreSendContentBlocks(content, report, { truncateOversizedText });
     if (nextContent === content) {
       return message;
     }
