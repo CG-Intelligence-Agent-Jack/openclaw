@@ -90,7 +90,10 @@ export default definePluginEntry({
       api.runtime.state.openSyncKeyedStore<StoredCodexAppServerBinding>({
         namespace: CODEX_APP_SERVER_BINDING_NAMESPACE,
         maxEntries: CODEX_APP_SERVER_BINDING_MAX_ENTRIES,
-        overflowPolicy: "reject-new",
+        // Bindings are a reconstructible routing cache. Rejecting a new entry
+        // at capacity drops an otherwise valid tagged-channel delivery before
+        // its agent turn can start.
+        overflowPolicy: "evict-oldest",
       }),
     );
     registerCodexCliMetadata(api);

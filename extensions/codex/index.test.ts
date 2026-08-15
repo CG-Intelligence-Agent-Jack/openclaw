@@ -53,6 +53,30 @@ describe("codex plugin", () => {
     expect(manifest.enabledByDefault).toBeUndefined();
   });
 
+  it("evicts the oldest binding instead of rejecting a new named-channel delivery at capacity", () => {
+    const openSyncKeyedStore = vi.fn(() => createCodexTestBindingStateStore());
+
+    plugin.register(
+      createTestPluginApi({
+        id: "codex",
+        name: "Codex",
+        source: "test",
+        config: {},
+        pluginConfig: {},
+        runtime: {
+          state: { openSyncKeyedStore },
+        } as never,
+      }),
+    );
+
+    expect(openSyncKeyedStore).toHaveBeenCalledWith(
+      expect.objectContaining({
+        namespace: "app-server-thread-bindings",
+        overflowPolicy: "evict-oldest",
+      }),
+    );
+  });
+
   it("registers the codex provider, agent harness, native thread tool, and hosted web search", () => {
     const registerAgentHarness = vi.fn();
     const registerCommand = vi.fn();
