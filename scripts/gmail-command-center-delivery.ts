@@ -47,6 +47,21 @@ export type SecureSecret = {
   inode: bigint;
 };
 
+export function assertDistinctSecureSecrets(
+  commandCenterSecret: SecureSecret,
+  hookSecret: SecureSecret,
+): void {
+  const sameFile =
+    commandCenterSecret.device === hookSecret.device &&
+    commandCenterSecret.inode === hookSecret.inode;
+  if (sameFile || safeEqualSecret(commandCenterSecret.value, hookSecret.value)) {
+    throw new CommandCenterMailDeliveryError(
+      "secret_reuse_forbidden",
+      "Command Center and local hook bearers must use different files and values",
+    );
+  }
+}
+
 function usage(): string {
   return [
     "Usage:",
@@ -385,15 +400,7 @@ export async function runCommandCenterMailDelivery(argv: string[]): Promise<void
     "Command Center bearer",
   );
   const hookSecret = readSecureSecret(options.hookTokenFile, "local hook bearer");
-  if (
-    commandCenterSecret.device === hookSecret.device &&
-    commandCenterSecret.inode === hookSecret.inode
-  ) {
-    throw new CommandCenterMailDeliveryError(
-      "secret_reuse_forbidden",
-      "Command Center and local hook bearers must use different files",
-    );
-  }
+  assertDistinctSecureSecrets(commandCenterSecret, hookSecret);
   const server = http.createServer(
     createCommandCenterMailDeliveryHandler({
       mailbox: options.mailbox,

@@ -5,6 +5,7 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  assertDistinctSecureSecrets,
   createCommandCenterMailDeliveryHandler,
   parseCommandCenterMailDeliveryArgs,
   readSecureSecret,
@@ -398,6 +399,30 @@ describe("Command Center Gmail delivery adapter", () => {
       expect(() => readSecureSecret(hardlinkPath, "synthetic bearer")).toThrowError(
         expect.objectContaining({ code: "invalid_secret_file" }),
       );
+    },
+  );
+
+  it.runIf(process.platform !== "win32")(
+    "requires distinct files to contain distinct bearer values",
+    () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mail-delivery-secret-pair-"));
+      tempDirs.push(dir);
+      const commandCenterPath = path.join(dir, "command-center.token");
+      const hookPath = path.join(dir, "hook.token");
+      fs.writeFileSync(commandCenterPath, `${commandCenterBearer}\n`, { mode: 0o600 });
+      fs.writeFileSync(hookPath, `${commandCenterBearer}\n`, { mode: 0o600 });
+
+      const commandCenterSecret = readSecureSecret(commandCenterPath, "Command Center bearer");
+      const reusedHookSecret = readSecureSecret(hookPath, "local hook bearer");
+      expect(() => assertDistinctSecureSecrets(commandCenterSecret, reusedHookSecret)).toThrowError(
+        expect.objectContaining({ code: "secret_reuse_forbidden" }),
+      );
+
+      fs.writeFileSync(hookPath, `${hookBearer}\n`, { mode: 0o600 });
+      const distinctHookSecret = readSecureSecret(hookPath, "local hook bearer");
+      expect(() =>
+        assertDistinctSecureSecrets(commandCenterSecret, distinctHookSecret),
+      ).not.toThrow();
     },
   );
 
