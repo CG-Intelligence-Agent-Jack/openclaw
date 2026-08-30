@@ -2,6 +2,7 @@ const EMAIL_ADDRESS_RE =
   /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
 const PROVIDER_ID_RE = /^[A-Za-z0-9_-]{1,256}$/;
 const RFC_MESSAGE_ID_RE = /^<[^<>\s@]+@[^<>\s@]+>$/;
+const RFC_MESSAGE_ID_MAX_LENGTH = 998;
 const MAX_BATCH_MESSAGES = 500;
 const MAX_BODY_LENGTH = 100_000;
 const MAX_SUBJECT_LENGTH = 300;
@@ -52,6 +53,21 @@ export type CommandCenterMailDryRunPlan = {
   requests: CommandCenterMailIngestRequest[];
 };
 
+export type CommandCenterMailMetadataTarget = {
+  messageId: string;
+  providerThreadId: string;
+};
+
+type ParsedCommandCenterMailIngestRequest = Omit<CommandCenterMailIngestRequest, "rfcMessageId">;
+
+type ParsedCommandCenterMailWatchPayload = {
+  mailbox: string;
+  receivedMessages: number;
+  deletedMessages: number;
+  duplicateMessages: number;
+  requestsById: Map<string, ParsedCommandCenterMailIngestRequest>;
+};
+
 export class CommandCenterMailPlanError extends Error {
   constructor(
     readonly code: string,
@@ -92,6 +108,10 @@ function normalizeMailbox(raw: string, label: string): string {
     fail("invalid_mailbox", `${label} must be one normalized email address`);
   }
   return mailbox;
+}
+
+export function normalizeCommandCenterMailConfiguredMailbox(raw: string): string {
+  return normalizeMailbox(raw, "configured mailbox");
 }
 
 function parseFromHeader(raw: string, index: number): { fromEmail: string; fromName?: string } {
@@ -140,7 +160,7 @@ function parseMetadataReceipts(value: unknown): Map<string, string> {
       "invalid_metadata",
       `metadata receipt ${index} RFC Message-ID`,
     );
-    if (!RFC_MESSAGE_ID_RE.test(rfcMessageId)) {
+    if (rfcMessageId.length > RFC_MESSAGE_ID_MAX_LENGTH || !RFC_MESSAGE_ID_RE.test(rfcMessageId)) {
       fail("invalid_metadata", `metadata receipt ${index} RFC Message-ID is invalid`);
     }
     if (receipts.has(id)) {
@@ -176,9 +196,8 @@ function parseMessage(params: {
   value: unknown;
   index: number;
   mailbox: string;
-  metadataReceipts: Map<string, string>;
-}): CommandCenterMailIngestRequest {
-  const { index, mailbox, metadataReceipts } = params;
+}): ParsedCommandCenterMailIngestRequest {
+  const { index, mailbox } = params;
   const message = asObject(params.value, "invalid_message", `message ${index}`);
   const id = requiredString(message, "id", "invalid_message", `message ${index} id`);
   if (!PROVIDER_ID_RE.test(id) || id.length > 200) {
@@ -226,10 +245,6 @@ function parseMessage(params: {
   if (Number.isNaN(receivedAt.getTime())) {
     fail("invalid_date", `message ${index} date is invalid`);
   }
-  const rfcMessageId = metadataReceipts.get(id);
-  if (!rfcMessageId) {
-    fail("missing_metadata", `message ${index} has no exact RFC Message-ID receipt`);
-  }
   const snippet = optionalString(message, "snippet");
   if (snippet && /[\r\n]/.test(snippet)) {
     fail("invalid_snippet", `message ${index} snippet is invalid`);
@@ -242,25 +257,23 @@ function parseMessage(params: {
     body,
     ...(snippet ? { snippet: snippet.slice(0, MAX_SNIPPET_LENGTH) } : {}),
     messageId: id,
-    rfcMessageId,
     providerThreadId: threadId,
     receivedAt: receivedAt.toISOString(),
   };
 }
 
 function requestsEqual(
-  left: CommandCenterMailIngestRequest,
-  right: CommandCenterMailIngestRequest,
+  left: ParsedCommandCenterMailIngestRequest,
+  right: ParsedCommandCenterMailIngestRequest,
 ): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-export function buildCommandCenterMailDryRunPlan(params: {
+function parseWatchPayload(params: {
   watchPayload: unknown;
-  metadataReceipts: unknown;
   mailbox: string;
-}): CommandCenterMailDryRunPlan {
-  const mailbox = normalizeMailbox(params.mailbox, "configured mailbox");
+}): ParsedCommandCenterMailWatchPayload {
+  const mailbox = normalizeCommandCenterMailConfiguredMailbox(params.mailbox);
   const root = asObject(params.watchPayload, "invalid_payload", "watch payload");
   if (root.source !== "gmail") {
     fail("invalid_source", "watch payload source must be gmail");
@@ -283,12 +296,11 @@ export function buildCommandCenterMailDryRunPlan(params: {
     );
   }
 
-  const metadataReceipts = parseMetadataReceipts(params.metadataReceipts);
   const deletedMessages = parseDeletedMessageCount(root);
-  const requestsById = new Map<string, CommandCenterMailIngestRequest>();
+  const requestsById = new Map<string, ParsedCommandCenterMailIngestRequest>();
   let duplicateMessages = 0;
   for (const [index, value] of root.messages.entries()) {
-    const request = parseMessage({ value, index, mailbox, metadataReceipts });
+    const request = parseMessage({ value, index, mailbox });
     const existing = requestsById.get(request.messageId);
     if (existing) {
       if (!requestsEqual(existing, request)) {
@@ -300,25 +312,59 @@ export function buildCommandCenterMailDryRunPlan(params: {
     requestsById.set(request.messageId, request);
   }
 
+  return {
+    mailbox,
+    receivedMessages: root.messages.length,
+    deletedMessages,
+    duplicateMessages,
+    requestsById,
+  };
+}
+
+export function inspectCommandCenterMailMetadataTargets(params: {
+  watchPayload: unknown;
+  mailbox: string;
+}): CommandCenterMailMetadataTarget[] {
+  const parsed = parseWatchPayload(params);
+  return [...parsed.requestsById.values()].map((request) => ({
+    messageId: request.messageId,
+    providerThreadId: request.providerThreadId,
+  }));
+}
+
+export function buildCommandCenterMailDryRunPlan(params: {
+  watchPayload: unknown;
+  metadataReceipts: unknown;
+  mailbox: string;
+}): CommandCenterMailDryRunPlan {
+  const parsed = parseWatchPayload({ watchPayload: params.watchPayload, mailbox: params.mailbox });
+  const metadataReceipts = parseMetadataReceipts(params.metadataReceipts);
+  const requests: CommandCenterMailIngestRequest[] = [];
+  for (const request of parsed.requestsById.values()) {
+    const rfcMessageId = metadataReceipts.get(request.messageId);
+    if (!rfcMessageId) {
+      fail("missing_metadata", "watch message has no exact RFC Message-ID receipt");
+    }
+    requests.push({ ...request, rfcMessageId });
+  }
   for (const id of metadataReceipts.keys()) {
-    if (!requestsById.has(id)) {
+    if (!parsed.requestsById.has(id)) {
       fail("orphan_metadata", "metadata receipt has no matching watch message");
     }
   }
 
-  const requests = [...requestsById.values()];
   return {
     summary: {
       contract: COMMAND_CENTER_MAIL_PLAN_CONTRACT,
       mode: "dry-run",
       ok: true,
-      mailbox,
+      mailbox: parsed.mailbox,
       counts: {
         notifications: 1,
-        receivedMessages: root.messages.length,
+        receivedMessages: parsed.receivedMessages,
         uniqueMessages: requests.length,
-        duplicateMessages,
-        deletedMessages,
+        duplicateMessages: parsed.duplicateMessages,
+        deletedMessages: parsed.deletedMessages,
         metadataReceipts: metadataReceipts.size,
         readyRequests: requests.length,
       },

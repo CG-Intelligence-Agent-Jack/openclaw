@@ -1330,6 +1330,7 @@
     "gateway:watch": "node scripts/watch-node.mjs gateway --force",
     "gen:host-env-policy:swift": "node scripts/generate-host-env-security-policy-swift.mjs --write",
     "ghsa:patch": "node scripts/ghsa-patch.mjs",
+    "gmail:command-center:deliver": "node --import tsx scripts/gmail-command-center-delivery.ts",
     "gmail:command-center:plan": "node --import tsx scripts/gmail-command-center-adapter.ts",
     "ios:beta": "bash scripts/ios-beta-release.sh",
     "ios:beta:archive": "bash scripts/ios-beta-archive.sh",
